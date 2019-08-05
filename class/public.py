@@ -29,6 +29,8 @@ def HttpGet(url,timeout = 6,headers = {}):
     @timeout 超时时间默认60秒
     return string
     """
+
+    if is_local(): return False
     home = 'www.bt.cn'
     host_home = 'data/home_host.pl'
     old_url = url
@@ -104,6 +106,7 @@ def HttpPost(url,data,timeout = 6,headers = {}):
     @timeout 超时时间默认60秒
     return string
     """
+    if is_local(): return False
     home = 'www.bt.cn'
     host_home = 'data/home_host.pl'
     old_url = url
@@ -605,7 +608,7 @@ def GetNumLines(path,num,p=1):
                         buf = "\n" + buf
             if not b: break;
         fp.close()
-    except: return []
+    except: return ""
     return "\n".join(data)
 
 #验证证书
@@ -708,6 +711,12 @@ def inArray(arrays,searchStr):
     
     return False
 
+#格式化指定时间戳
+def format_date(format="%Y-%m-%d %H:%M:%S",times = None):
+    if not times: times = int(time.time())
+    time_local = time.localtime(times)
+    return time.strftime(format, time_local) 
+
 
 #检查Web服务器配置文件是否有错误
 def checkWebConfig():
@@ -772,12 +781,17 @@ def getStrBetween(startStr,endStr,srcStr):
 
 #取CPU类型
 def getCpuType():
-    cpuinfo = open('/proc/cpuinfo','r').read();
+    cpuinfo = open('/proc/cpuinfo','r').read()
     rep = "model\s+name\s+:\s+(.+)"
-    tmp = re.search(rep,cpuinfo);
-    cpuType = None
+    tmp = re.search(rep,cpuinfo,re.I);
+    cpuType = ''
     if tmp:
-        cpuType = tmp.groups()[0];
+        cpuType = tmp.groups()[0]
+    else:
+        cpuinfo = ExecShell('LANG="en_US.UTF-8" && lscpu')[0]
+        rep = "Model\s+name:\s+(.+)"
+        tmp = re.search(rep,cpuinfo,re.I)
+        if tmp: cpuType = tmp.groups()[0]
     return cpuType;
 
 
@@ -1200,19 +1214,19 @@ def get_path_size(path):
     return size_total
 
 #写关键请求日志
-def write_request_log():
+def write_request_log(reques = None):
     try:
         log_path = '/www/server/panel/logs/request'
         log_file = getDate(format='%Y-%m-%d') + '.json'
         if not os.path.exists(log_path): os.makedirs(log_path)
 
         from flask import request
-        log_data = {}
-        log_data['date'] = getDate()
-        log_data['ip'] = GetClientIp()
-        log_data['method'] = request.method
-        log_data['uri'] = request.full_path
-        log_data['user-agent'] = request.headers.get('User-Agent')
+        log_data = []
+        log_data.append(getDate())
+        log_data.append(GetClientIp())
+        log_data.append(request.method)
+        log_data.append(request.full_path)
+        log_data.append(request.headers.get('User-Agent'))
         WriteFile(log_path + '/' + log_file,json.dumps(log_data) + "\n",'a+')
     except: pass
 
@@ -1253,3 +1267,152 @@ def set_own(filename,user,group=None):
         group = user_info.pw_gid
     os.chown(filename,user,group)
     return True
+
+#校验路径安全
+def path_safe_check(path):
+    checks = ['..','./','\\','%','$','^','&','*','~','@','#']
+    for c in checks:
+        if path.find(c) != -1: return False
+    rep = "^[\w\s\.\/-]+$"
+    if not re.match(rep,path): return False
+    return True
+
+#取数据库字符集
+def get_database_character(db_name):
+    try:
+        import panelMysql
+        tmp = panelMysql.panelMysql().query("show create database `%s`" % db_name.strip())
+        c_type = str(re.findall("SET\s+([\w\d-]+)\s",tmp[0][1])[0])
+        c_types = ['utf8','utf-8','gbk','big5','utf8mb4']
+        if not c_type.lower() in c_types: return 'utf8'
+        return c_type
+    except:
+        return 'utf8'
+
+def en_punycode(domain):
+        tmp = domain.split('.');
+        newdomain = '';
+        for dkey in tmp:
+            #匹配非ascii字符
+            match = re.search(u"[\x80-\xff]+",dkey);
+            if not match: match = re.search(u"[\u4e00-\u9fa5]+",dkey);
+            if not match:
+                newdomain += dkey + '.';
+            else:
+                newdomain += 'xn--' + dkey.encode('punycode').decode('utf-8') + '.'
+        return newdomain[0:-1];
+
+#punycode 转中文
+def de_punycode(domain):
+    tmp = domain.split('.');
+    newdomain = '';
+    for dkey in tmp:
+        if dkey.find('xn--') >=0:
+            newdomain += dkey.replace('xn--','').encode('utf-8').decode('punycode') + '.'
+        else:
+            newdomain += dkey + '.'
+    return newdomain[0:-1];
+
+#取计划任务文件路径
+def get_cron_path():
+    u_file = '/var/spool/cron/crontabs/root'
+    if not os.path.exists(u_file):
+        file='/var/spool/cron/root'
+    else:
+        file=u_file
+    return file
+
+#加密字符串
+def en_crypt(key,strings):
+    try:
+        if type(strings) != bytes: strings = strings.encode('utf-8')
+        from cryptography.fernet import Fernet
+        f = Fernet(key)
+        result = f.encrypt(strings)
+        return result.decode('utf-8')
+    except:
+        print(get_error_info())
+        return strings
+
+#解密字符串
+def de_crypt(key,strings):
+    try:
+        if type(strings) != bytes: strings = strings.encode('utf-8')
+        from cryptography.fernet import Fernet
+        f = Fernet(key)
+        result =  f.decrypt(strings).decode('utf-8')
+        return result
+    except:
+        print(get_error_info())
+        return strings
+
+
+#检查IP白名单
+def check_ip_panel():
+    ip_file = 'data/limitip.conf'
+    if os.path.exists(ip_file):
+        iplist = ReadFile(ip_file)
+        if iplist:
+            iplist = iplist.strip();
+            if not GetClientIp() in iplist.split(','): 
+                errorStr = ReadFile('./BTPanel/templates/' + GetConfigValue('template') + '/error2.html')
+                try:
+                    errorStr = errorStr.format(getMsg('PAGE_ERR_TITLE'),getMsg('PAGE_ERR_IP_H1'),getMsg('PAGE_ERR_IP_P1',(GetClientIp(),)),getMsg('PAGE_ERR_IP_P2'),getMsg('PAGE_ERR_IP_P3'),getMsg('NAME'),getMsg('PAGE_ERR_HELP'))
+                except IndexError:pass
+                return errorStr
+    return False
+
+#检查面板域名
+def check_domain_panel():
+    tmp = GetHost()
+    domain = ReadFile('data/domain.conf')
+    if domain:
+        if tmp.strip().lower() != domain.strip().lower(): 
+            errorStr = ReadFile('./BTPanel/templates/' + GetConfigValue('template') + '/error2.html')
+            try:
+                errorStr = errorStr.format(getMsg('PAGE_ERR_TITLE'),getMsg('PAGE_ERR_DOMAIN_H1'),getMsg('PAGE_ERR_DOMAIN_P1'),getMsg('PAGE_ERR_DOMAIN_P2'),getMsg('PAGE_ERR_DOMAIN_P3'),getMsg('NAME'),getMsg('PAGE_ERR_HELP'))
+            except IndexError:pass
+            return errorStr
+    return False
+
+#是否离线模式
+def is_local():
+    s_file = '/www/server/panel/data/not_network.pl'
+    return os.path.exists(s_file)
+
+
+#自动备份面板数据
+def auto_backup_panel():
+    b_path = '/www/backup/panel'
+    backup_path = b_path + '/' + format_date('%Y-%m-%d')
+    panel_paeh = '/www/server/panel'
+    if os.path.exists(backup_path): return True
+    os.makedirs(backup_path,384)
+    import shutil
+    shutil.copytree(panel_paeh + '/data',backup_path + '/data')
+    shutil.copytree(panel_paeh + '/config',backup_path + '/config')
+    time_now = time.time() - (86400 * 15)
+    for f in os.listdir(b_path):
+        try:
+            if time.mktime(time.strptime(f, "%Y-%m-%d")) < time_now: 
+                path = b_path + '/' + f
+                if os.path.exists(path): shutil.rmtree(path)
+        except: continue
+
+
+
+
+#取通用对象
+class dict_obj:
+    def __contains__(self, key):
+        return getattr(self,key,None)
+    def __setitem__(self, key, value): setattr(self,key,value)
+    def __getitem__(self, key): return getattr(self,key,None)
+    def __delitem__(self,key): delattr(self,key)
+    def __delattr__(self, key): delattr(self,key)
+    def get_items(self): return self
+
+
+
+
+

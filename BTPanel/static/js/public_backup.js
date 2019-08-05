@@ -515,12 +515,15 @@ var bt =
 		if(!config.hasOwnProperty('time')) config.time = 2000;		
 		if(typeof config.msg=='string' && bt.contains(config.msg,'ERROR')) config.time = 0;
 		
-		if(config.hasOwnProperty('icon')){
-			if(typeof config.icon=='boolean') config.icon = config.icon?1:2;
-		}
-		else if(config.hasOwnProperty('status')){
-			config.icon=config.status?1:2;
-		}
+        if (config.hasOwnProperty('icon')) {
+            if (typeof config.icon == 'boolean') config.icon = config.icon ? 1 : 2;
+        }
+        else if (config.hasOwnProperty('status')) {
+            config.icon = config.status ? 1 : 2;
+            if (!config.status) {
+                btnObj.time = 0;
+            }
+        }
 		if(config.icon) btnObj.icon = config.icon;
 		btnObj.time = config.time;
 		var msg = ''
@@ -530,7 +533,7 @@ var bt =
 		
 		layer.msg(msg,btnObj);	
 	},
-	confirm : function(config,callback){
+	confirm : function(config,callback,callback1){
 		var btnObj =  {						
 			title:config.title?config.title:false,
 			time : config.time?config.time:0,					
@@ -538,10 +541,13 @@ var bt =
 			closeBtn: config.closeBtn?config.closeBtn:2,	
 			scrollbar:true,
 			shade:0.3,
-			icon:3
+			icon:3,
+			cancel: (config.cancel?config.cancel:function(){})
 		};
 		layer.confirm(config.msg, btnObj, function(index){
 		 	if(callback) callback(index);
+		},function(index){
+			if(callback1) callback1(index);
 		});
 	},
 	load : function(msg)  
@@ -776,10 +782,17 @@ var bt =
 			var _form = $("<div data-id='form"+bs+"' class='bt-form bt-form pd20 pb70'></div>");			
 			var _lines = data.list; 
 			var clicks = [];
-			for (var i = 0;i<_lines.length;i++){
-				var rRet = bt.render_form_line(_lines[i],bs);
-				for(var s = 0;s<rRet.clicks.length;s++) clicks.push(rRet.clicks[s]);			
-				_form.append(rRet.html);				
+			for (var i = 0; i < _lines.length; i++)
+            {
+                var _obj = _lines[i]
+                if (_obj.hasOwnProperty("html")) {
+                    _form.append(_obj.html)
+                }
+                else {
+                    var rRet = bt.render_form_line(_obj, bs);
+                    for (var s = 0; s < rRet.clicks.length; s++) clicks.push(rRet.clicks[s]);
+                    _form.append(rRet.html);	
+                }			
 			}
 			
 			var _btn_html = '';
@@ -796,7 +809,8 @@ var bt =
 				area: data.area,
 				title: data.title,
 				closeBtn: 2,
-				content:_form.prop("outerHTML")
+				content:_form.prop("outerHTML"),
+                end: data.end ? data.end : false
 			})				
 			setTimeout(function(){
 				bt.render_clicks(clicks,loadOpen,callback);			
@@ -4648,7 +4662,8 @@ bt.site = {
 	set_cert_ssl:function(certName,siteName,callback){
 		var loadT = bt.load('正在部署证书...');
 		bt.send('SetCertToSite','ssl/SetCertToSite',{certName:certName,siteName:siteName},function(rdata){
-			loadT.close();			
+            loadT.close();
+            site.reload();
 			if(callback) callback(rdata);	
 			bt.msg(rdata);
 		})	
@@ -4875,7 +4890,7 @@ bt.form ={
 		data_access:{ title:'访问权限',items:[
 					{name:'dataAccess',type:'select',width:'100px',items:[
 					{title:'本地服务器',value:'127.0.0.1'},
-					{title:'所有人',value:'%'},
+					{title:'所有人(不安全)',value:'%'},
 					{title:'指定IP',value:'ip'}
 				],callback:function(obj){
 					var subid = obj.attr('name')+'_subid';

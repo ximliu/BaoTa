@@ -70,11 +70,12 @@ class plugin_deployment:
     def get_icon(self,pinfo):
         path = '/www/server/panel/BTPanel/static/img/dep_ico'
         if not os.path.exists(path): os.makedirs(path,384)
-        filename = path + '/' + pinfo['name'] + '.png'
+        filename = "%s/%s.png" %  (path, pinfo['name'])
         m_uri = pinfo['min_image']
-        pinfo['min_image'] = '/static/img/dep_ico/' + pinfo['name'] + '.png'
+        pinfo['min_image'] = '/static/img/dep_ico/%s.png' % pinfo['name']
+        if sys.version_info[0] == 2: filename = filename.encode('utf-8')
         if os.path.exists(filename): 
-            if os.path.getsize(filename) > 1024: return pinfo
+            if os.path.getsize(filename) > 100: return pinfo
         os.system("wget -O " + filename + ' http://www.bt.cn' + m_uri + " &")
         return pinfo
     
@@ -285,7 +286,7 @@ class plugin_deployment:
         self.WriteLogs(json.dumps({'name':'安装必要的PHP扩展','total':0,'used':0,'pre':0,'speed':0}));
         import files
         mfile = files.files();
-        pinfo['php_ext'] = pinfo['php_ext'].strip().split(',')
+        if type(pinfo['php_ext']) == str : pinfo['php_ext'] = pinfo['php_ext'].strip().split(',')
         for ext in pinfo['php_ext']:
             if ext == 'pathinfo': 
                 import config
@@ -302,6 +303,7 @@ class plugin_deployment:
         #解禁PHP函数
         if 'enable_functions' in pinfo:
             try:
+                if type(pinfo['enable_functions']) == str : pinfo['enable_functions'] = pinfo['enable_functions'].strip().split(',')
                 php_f = public.GetConfigValue('setup_path') + '/php/' + php_version + '/etc/php.ini'
                 php_c = public.readFile(php_f)
                 rep = "disable_functions\s*=\s{0,1}(.*)\n"
@@ -345,6 +347,13 @@ class plugin_deployment:
             rewriteConf = public.readFile(swfile);
             dwfile = self.__panelPath + '/vhost/rewrite/' + site_name + '.conf';
             public.writeFile(dwfile,rewriteConf);
+
+        swfile = path + '/.htaccess';
+        if os.path.exists(swfile):
+            swpath = (path + '/'+ pinfo['run_path'] + '/.htaccess').replace('//','/')
+            if pinfo['run_path'] != '/' and not os.path.exists(swpath):
+                public.writeFile(swpath, public.readFile(swfile))
+
                 
         #删除伪静态文件
         public.ExecShell("rm -f " + path + '/*.rewrite')
@@ -382,6 +391,7 @@ class plugin_deployment:
 
         #清理文件和目录
         self.WriteLogs(json.dumps({'name':'清理多余的文件','total':0,'used':0,'pre':0,'speed':0}));
+        if type(pinfo['remove_file']) == str : pinfo['remove_file'] = pinfo['remove_file'].strip().split(',')
         for f_path in pinfo['remove_file']:
             filename = (path + '/' + f_path).replace('//','/')
             if os.path.exists(filename):
@@ -426,9 +436,9 @@ class plugin_deployment:
                 os.remove(p_info)
                 i_ndex_html = path + '/index.html'
                 if os.path.exists(i_ndex_html): os.remove(i_ndex_html)
-                public.ExecShell("\cp -a -r " + p_tmp + '/* ' + path + '/')
+                os.system("\cp -arf " + p_tmp + '/. ' + path + '/')
             except: pass
-        public.ExecShell("rm -rf " + self.__tmp + '/*')
+        os.system("rm -rf " + self.__tmp + '/*')
         return p_config
                 
     

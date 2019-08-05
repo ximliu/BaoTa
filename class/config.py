@@ -14,12 +14,19 @@ class config:
     
     def getPanelState(self,get):
         return os.path.exists('/www/server/panel/data/close.pl');
+
+    def reload_session(self):
+        userInfo = public.M('users').where("id=?",(1,)).field('username,password').find()
+        token = public.Md5(userInfo['username'] + '/' + userInfo['password'])
+        public.writeFile('/www/server/panel/data/login_token.pl',token)
+        session['login_token'] = token
     
     def setPassword(self,get):
         if get.password1 != get.password2: return public.returnMsg(False,'USER_PASSWORD_CHECK')
         if len(get.password1) < 5: return public.returnMsg(False,'USER_PASSWORD_LEN')
         public.M('users').where("username=?",(session['username'],)).setField('password',public.md5(get.password1.strip()))
         public.WriteLog('TYPE_PANEL','USER_PASSWORD_SUCCESS',(session['username'],))
+        self.reload_session()
         return public.returnMsg(True,'USER_PASSWORD_SUCCESS')
     
     def setUsername(self,get):
@@ -28,6 +35,7 @@ class config:
         public.M('users').where("username=?",(session['username'],)).setField('username',get.username1.strip())
         public.WriteLog('TYPE_PANEL','USER_USERNAME_SUCCESS',(session['username'],get.username2))
         session['username'] = get.username1
+        self.reload_session()
         return public.returnMsg(True,'USER_USERNAME_SUCCESS')
     
     def setPanel(self,get):
@@ -36,7 +44,9 @@ class config:
         sess_out_path = 'data/session_timeout.pl'
         if 'session_timeout' in get:
             session_timeout = int(get.session_timeout)
-            if int(public.readFile(sess_out_path)) != session_timeout:
+            s_time_tmp = public.readFile(sess_out_path)
+            if not s_time_tmp: s_time_tmp = '0'
+            if int(s_time_tmp) != session_timeout:
                 if session_timeout < 300: return public.returnMsg(False,'超时时间不能小于300秒')
                 public.writeFile(sess_out_path,str(session_timeout))
                 isReWeb = True
@@ -406,20 +416,29 @@ class config:
     
     #设置面板SSL
     def SetPanelSSL(self,get):
-        sslConf = '/www/server/panel/data/ssl.pl';
-        if os.path.exists(sslConf):
-            os.system('rm -f ' + sslConf);
-            return public.returnMsg(True,'PANEL_SSL_CLOSE');
+        if hasattr(get,"email"):
+            rep_mail = "^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+)+$"
+            if not re.search(rep_mail,get.email):
+                return public.returnMsg(False,'邮箱格式不合法')
+            import setPanelLets
+            sp = setPanelLets.setPanelLets()
+            sps = sp.set_lets(get)
+            return sps
         else:
-            os.system('pip insatll cffi==1.10');
-            os.system('pip install cryptography==2.1');
-            os.system('pip install pyOpenSSL==16.2');
-            try:
-                if not self.CreateSSL(): return public.returnMsg(False,'PANEL_SSL_ERR');
-                public.writeFile(sslConf,'True')
-            except Exception as ex:
-                return public.returnMsg(False,'PANEL_SSL_ERR');
-            return public.returnMsg(True,'PANEL_SSL_OPEN');
+            sslConf = '/www/server/panel/data/ssl.pl';
+            if os.path.exists(sslConf):
+                os.system('rm -f ' + sslConf);
+                return public.returnMsg(True,'PANEL_SSL_CLOSE');
+            else:
+                os.system('pip install cffi');
+                os.system('pip install cryptography');
+                os.system('pip install pyOpenSSL');
+                try:
+                    if not self.CreateSSL(): return public.returnMsg(False,'PANEL_SSL_ERR');
+                    public.writeFile(sslConf,'True')
+                except Exception as ex:
+                    return public.returnMsg(False,'PANEL_SSL_ERR');
+                return public.returnMsg(True,'PANEL_SSL_OPEN');
     #自签证书
     def CreateSSL(self):
         if os.path.exists('ssl/input.pl'): return True;
@@ -428,7 +447,7 @@ class config:
         key.generate_key(OpenSSL.crypto.TYPE_RSA, 2048)
         cert = OpenSSL.crypto.X509()
         cert.set_serial_number(0)
-        cert.get_subject().CN = '120.27.27.98';
+        cert.get_subject().CN = public.GetLocalIp()
         cert.set_issuer(cert.get_subject())
         cert.gmtime_adj_notBefore( 0 )
         cert.gmtime_adj_notAfter(86400 * 3650)
@@ -437,8 +456,8 @@ class config:
         cert_ca = OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM, cert)
         private_key = OpenSSL.crypto.dump_privatekey(OpenSSL.crypto.FILETYPE_PEM, key)
         if len(cert_ca) > 100 and len(private_key) > 100:
-            public.writeFile('ssl/certificate.pem',cert_ca)
-            public.writeFile('ssl/privateKey.pem',private_key)
+            public.writeFile('ssl/certificate.pem',cert_ca,'wb+')
+            public.writeFile('ssl/privateKey.pem',private_key,'wb+')
             return True
         return False
         
@@ -904,3 +923,36 @@ class config:
         public.writeFile(filename,'')
         public.WriteLog('面板配置','清空面板运行日志')
         return public.returnMsg(True,'已清空!')
+
+    # 获取lets证书
+    def get_cert_source(self,get):
+        import setPanelLets
+        sp = setPanelLets.setPanelLets()
+        spg = sp.get_cert_source()
+        return spg
+
+    #设置debug模式
+    def set_debug(self,get):
+        debug_path = 'data/debug.pl'
+        if os.path.exists(debug_path):
+            t_str = '关闭'
+            os.remove(debug_path)
+        else:
+            t_str = '开启'
+            public.writeFile(debug_path,'True')
+        public.WriteLog('面板配置','%s开发者模式(debug)' % t_str)
+        public.restart_panel()
+        return public.returnMsg(True,'设置成功!')
+
+
+    #设置离线模式
+    def set_local(self,get):
+        d_path = 'data/not_network.pl'
+        if os.path.exists(d_path):
+            t_str = '关闭'
+            os.remove(d_path)
+        else:
+            t_str = '开启'
+            public.writeFile(d_path,'True')
+        public.WriteLog('面板配置','%s离线模式' % t_str)
+        return public.returnMsg(True,'设置成功!')
